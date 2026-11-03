@@ -35,7 +35,7 @@ Files 패널이 안 보이면
   install.cmd / install.ps1   설치 (모양 선택)
   chiikawa\                   치이카와 레이아웃, 배경 그림, 모드(chiikawa-files, -files-drag, -tabs, -changes, -github)
   basic\                      기본 모양용 모드(files-drag-path, files-drag-path-layer)
-  (chiikawa-github 는 ssenu/Herdr-UI 기반, Apache-2.0: chiikawa\mods\chiikawa-github\LICENSE)
+  (GitHub 연동은 ssenu/Herdr-UI 의 작업을 가져와 합침, Apache-2.0: chiikawa\mods\chiikawa-github\LICENSE)
   배경 그림 출처: https://chiikawawallpaper.com/
 
 지우기 (~\.config\herdr-app 안에서)

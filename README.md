@@ -88,5 +88,6 @@ basic/                      기본 모양용 모드 2개
 ## 크레딧
 
 - 배경 그림(`chiikawa/backgrounds/chiikawa-starry-br.jpg`) 출처: [chiikawawallpaper.com](https://chiikawawallpaper.com/)
-- `chiikawa-github` 패널과 클립보드 붙여넣기 아이디어는 [ssenu/Herdr-UI](https://github.com/ssenu/Herdr-UI)를 바탕으로 했어요 (Apache-2.0, `chiikawa/mods/chiikawa-github/LICENSE`).
+- 레이아웃, 패널(Herdr 기본 Files·Changes를 바탕으로 고친 것), 끌어다 놓기(클립보드 붙여넣기)는 직접 만들었어요.
+- GitHub 연동(`chiikawa-github`의 이슈·PR 가져오기)은 [ssenu/Herdr-UI](https://github.com/ssenu/Herdr-UI)의 작업을 가져와 이 레이아웃에 맞게 합쳤어요 (Apache-2.0, `chiikawa/mods/chiikawa-github/LICENSE`).
 - 치이카와(ちいかわ) 캐릭터의 권리는 원작자 나가노(ナガノ)에게 있어요. 이 저장소는 비공식 팬 제작물이에요.

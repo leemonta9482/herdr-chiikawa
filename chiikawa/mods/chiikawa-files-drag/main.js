@@ -21,7 +21,7 @@ export default class FilesDrag extends View {
     const typed = text ?? (path ? quote(path) : null);
     try {
       // ponytail: lands in the focused terminal, not the one under the pointer (panes() has no bounds),
-      // and replaces the clipboard. Clipboard via cx.write_to_clipboard (idea from ssenu/Herdr-UI).
+      // and replaces the clipboard. Clipboard via cx.write_to_clipboard.
       if (typed && position && !inside(panel, position)) {
         cx.write_to_clipboard(typed);
         run("terminal.paste", {});
