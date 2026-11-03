@@ -4,7 +4,9 @@
 
 Files 패널에서 파일이나 폴더를 터미널로 끌어다 놓으면 그 **절대경로가 바로 입력**돼요.
 
-![치이카와 밤하늘 레이아웃](docs/preview.png)
+![치이카와 밤하늘 배경](docs/background.jpg)
+
+<sub>배경 그림 출처: [chiikawawallpaper.com](https://chiikawawallpaper.com/)</sub>
 
 ## 기능
 
@@ -85,5 +87,6 @@ basic/                      기본 모양용 모드 2개
 
 ## 크레딧
 
+- 배경 그림(`chiikawa/backgrounds/chiikawa-starry-br.jpg`) 출처: [chiikawawallpaper.com](https://chiikawawallpaper.com/)
 - `chiikawa-github` 패널과 클립보드 붙여넣기 아이디어는 [ssenu/Herdr-UI](https://github.com/ssenu/Herdr-UI)를 바탕으로 했어요 (Apache-2.0, `chiikawa/mods/chiikawa-github/LICENSE`).
 - 치이카와(ちいかわ) 캐릭터의 권리는 원작자 나가노(ナガノ)에게 있어요. 이 저장소는 비공식 팬 제작물이에요.

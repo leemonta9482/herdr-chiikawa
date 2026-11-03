@@ -36,6 +36,7 @@ Files 패널이 안 보이면
   chiikawa\                   치이카와 레이아웃, 배경 그림, 모드(chiikawa-files, -files-drag, -tabs, -changes, -github)
   basic\                      기본 모양용 모드(files-drag-path, files-drag-path-layer)
   (chiikawa-github 는 ssenu/Herdr-UI 기반, Apache-2.0: chiikawa\mods\chiikawa-github\LICENSE)
+  배경 그림 출처: https://chiikawawallpaper.com/
 
 지우기 (~\.config\herdr-app 안에서)
   먼저 Ctrl+Shift+L 로 다른 레이아웃을 고른 뒤
