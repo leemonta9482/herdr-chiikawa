@@ -5,7 +5,7 @@
   "preview": "layouts/chiikawa.png",
   "titlebar": "none",
   "traffic_lights": [12, 16],
-  "theme": "graphite",
+  "theme": "chiikawa",
   "colors": {
     "canvas": "#00000000",
     "chrome": "#0e14308c",

@@ -11,6 +11,10 @@ Write-Host "파일 복사 완료: $app" -ForegroundColor Green
 # 편집 가능한 Files 패널 + Ctrl+S 단축키
 New-Item -ItemType Directory -Force (Join-Path $app 'mods') | Out-Null
 Copy-Item (Join-Path $src 'mods\*') (Join-Path $app 'mods') -Recurse -Force
+
+# 레이아웃 전용 테마 (밤하늘 색, 밝은 모드에서도 같게 보임)
+New-Item -ItemType Directory -Force (Join-Path $app 'themes') | Out-Null
+Copy-Item (Join-Path $src 'themes\chiikawa.json') (Join-Path $app 'themes') -Force
 $keysPath = Join-Path $app 'keys.json'
 if (Test-Path $keysPath) {
   $raw = Get-Content $keysPath -Raw -Encoding UTF8
