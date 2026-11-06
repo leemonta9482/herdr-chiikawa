@@ -7,7 +7,7 @@ param([ValidateSet('', 'chiikawa', 'basic')][string]$Style = '', [string]$Layout
 if (-not $Style) {
   Write-Host ""
   Write-Host "어떤 모양으로 설치할까요?" -ForegroundColor Cyan
-  Write-Host "  1) 치이카와 밤하늘 레이아웃 (배경, 투명도, Files/Changes/GitHub 패널 + 끌어다 놓기)"
+  Write-Host "  1) 치이카와 밤하늘 레이아웃 (배경, 투명도, Files/Changes/GitHub/Plugin/Session 패널 + 끌어다 놓기)"
   Write-Host "  2) 기본 Herdr 모양 그대로 (끌어다 놓기만 추가)"
   $c = Read-Host "번호를 입력하세요 (그냥 Enter = 1)"
   $Style = if ($c.Trim() -eq '2') { 'basic' } else { 'chiikawa' }
