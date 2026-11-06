@@ -19,9 +19,15 @@ Files 패널에서 파일이나 폴더를 터미널로 끌어다 놓으면 그 *
 
 ### 치이카와 레이아웃에만 있는 것
 - 밤하늘 배경, 반투명 터미널, 남색 유리 느낌 색 (전용 테마라 Windows 밝은 모드에서도 같은 색)
-- 상단 탭바의 **Files / Changes / GitHub** 버튼
+- 상단 탭바의 **Files / Changes / GitHub / Plugin / Session** 버튼 (패널은 모두 유리 배경, 열고 닫을 때 미끄러지는 애니메이션)
 - Files 패널에서 파일을 바로 고치고 `Ctrl+S`로 저장, `..`로 상위 폴더, `.md` 미리보기, 디스크 변경 자동 반영
+- Files 패널의 **파일 찾기**: 목록 위 입력칸에 이름 일부를 치면 폴더 아래 모든 파일에서 퍼지 검색 (`↑`/`↓`, `Enter`, `Esc`)
+- Files 패널의 **[바탕화면]** 칩: 바탕화면 폴더로 이동, 다시 누르거나 `Files` 제목을 누르면 원래 폴더로
+- 각 행의 **`⋯`**: 기본 프로그램 / VS Code / 탐색기에서 보기 / 경로 복사
 - GitHub 이슈·PR 패널 (`gh` CLI 필요)
+- **Plugin** 패널: Claude Code·Codex가 지금 폴더에서 보는 MCP 서버와 스킬 목록 (읽기 전용, 비밀 값은 가림)
+- **Session** 패널: 지금 저장소의 Claude Code 세션 목록, 누르면 새 탭에서 `claude -r`로 이어서 열기
+- 원격 Windows PC(ssh) 공간에서도 파일 찾기·Plugin·Session이 그 PC의 내용을 읽어요
 
 ## 설치
 
@@ -29,7 +35,7 @@ Files 패널에서 파일이나 폴더를 터미널로 끌어다 놓으면 그 *
 2. Herdr를 켠 상태에서 `install.cmd`를 더블클릭해요.
 3. 모양을 골라요.
    ```
-   1) 치이카와 밤하늘 레이아웃 (배경, 투명도, Files/Changes/GitHub 패널 + 끌어다 놓기)
+   1) 치이카와 밤하늘 레이아웃 (배경, 투명도, Files/Changes/GitHub/Plugin/Session 패널 + 끌어다 놓기)
    2) 기본 Herdr 모양 그대로 (끌어다 놓기만 추가)
    ```
    그냥 Enter를 누르면 1번이에요.
@@ -50,6 +56,10 @@ PowerShell에서 직접 설치할 수도 있어요.
 ```powershell
 gh auth login
 ```
+
+### Session 패널 · VS Code로 열기 (치이카와)
+- Session 패널로 세션을 열려면 그 PC에 `claude` 명령이 있어야 해요. 이미 열려 있는 세션은 구분하지 못하니 같은 세션을 두 탭에서 열지 마세요.
+- `⋯` → VS Code로 열기는 `code` 명령이 PATH에 있어야 해요 (VS Code 설치 시 기본값).
 
 ## 알아둘 점
 
@@ -73,13 +83,16 @@ gh auth login
 
 ```
 install.cmd / install.ps1   설치 (모양 선택)
-chiikawa/                   치이카와 레이아웃, 배경, 모드 5개
-  layouts/  backgrounds/
-  mods/chiikawa-files         Files 패널 (끌어다 놓기, 편집·저장)
+chiikawa/                   치이카와 레이아웃, 배경, 모드 8개
+  layouts/  backgrounds/  themes/
+  mods/chiikawa-files         Files 패널 (끌어다 놓기, 편집·저장, 파일 찾기, 바탕화면 칩)
   mods/chiikawa-files-drag    끌기 중 이름표, 놓으면 경로 입력
-  mods/chiikawa-tabs          탭바 (Files / Changes / GitHub 버튼)
+  mods/chiikawa-files-open    행의 ⋯ 메뉴 (기본 프로그램 / VS Code / 탐색기 / 경로 복사)
+  mods/chiikawa-tabs          탭바 (Files / Changes / GitHub / Plugin / Session 버튼)
   mods/chiikawa-changes       Changes 패널
   mods/chiikawa-github        GitHub 이슈·PR 패널
+  mods/chiikawa-plugins       MCP 서버·스킬 목록 패널
+  mods/chiikawa-sessions      Claude Code 세션 목록 패널
 basic/                      기본 모양용 모드 2개
   mods/files-drag-path        Files 패널 (기본 files + 끌어다 놓기)
   mods/files-drag-path-layer  끌기 중 이름표, 놓으면 경로 입력
@@ -89,5 +102,7 @@ basic/                      기본 모양용 모드 2개
 
 - 배경 그림(`chiikawa/backgrounds/chiikawa-starry-br.jpg`) 출처: [chiikawawallpaper.com](https://chiikawawallpaper.com/)
 - 레이아웃, 패널(Herdr 기본 Files·Changes를 바탕으로 고친 것), 끌어다 놓기(클립보드 붙여넣기)는 직접 만들었어요.
-- GitHub 연동(`chiikawa-github`의 이슈·PR 가져오기)은 [ssenu/Herdr-UI](https://github.com/ssenu/Herdr-UI)의 작업을 가져와 이 레이아웃에 맞게 합쳤어요 (Apache-2.0, `chiikawa/mods/chiikawa-github/LICENSE`).
+- 아래는 [ssenu/Herdr-UI](https://github.com/ssenu/Herdr-UI)의 작업을 가져와 이 레이아웃에 맞게(유리 배경, 열고 닫기 애니메이션, 원격 Windows 지원) 고쳤어요 (Apache-2.0, 각 폴더의 `LICENSE`).
+  - GitHub 연동(`chiikawa-github`), Plugin 패널(`chiikawa-plugins`), Session 패널(`chiikawa-sessions`)
+  - Files의 파일 찾기(`chiikawa-files/search.js`)와 바탕화면 칩, `⋯` 메뉴(`chiikawa-files-open`)
 - 치이카와(ちいかわ) 캐릭터의 권리는 원작자 나가노(ナガノ)에게 있어요. 이 저장소는 비공식 팬 제작물이에요.
