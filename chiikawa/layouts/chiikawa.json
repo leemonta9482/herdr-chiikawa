@@ -108,7 +108,7 @@
           ]
         },
         { "id": "status", "type": "block", "size": { "px": 28 }, "background": "chrome",
-          "content": { "mod": "workspace-status" } }
+          "content": { "mod": "chiikawa-status" } }
       ]
     }
   ]

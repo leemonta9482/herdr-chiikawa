@@ -11,7 +11,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, nextCommand, notify, openOverlay, appHome, layout, shared, run } from "herdr";
 import * as fs from "fs/promises";
-import { searchPaths, splitPath, segments, indexCommand, indexLines } from "./search.js";
+import { searchPaths, splitPath, segments, indexCommand, indexLines, switchQuery } from "./search.js";
 
 // Writes a file on another machine: text -> temp file under the app home -> `hc file write --on < temp`.
 async function upload(on, full, text) {
@@ -106,8 +106,12 @@ export default class Files extends View {
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     // File search: the query, the selected result, and per-folder indexes (context key → index).
     this.query = ""; this.at = 0; this.indexes = new Map(); this.found = null;
+    this.queries = new Map(); this.querySpace = undefined; // each space keeps its own search
     this.search = InputState.new({ placeholder: "이 폴더에서 파일 찾기" });
-    this.search.on("change", (_e, cx) => { this.query = this.search.value(); this.at = 0; this.ensureIndex(cx); cx.notify(); });
+    this.search.on("change", (_e, cx) => {
+      if (this.search.value() === this.query) return; // syncQuery put it there
+      this.query = this.search.value(); this.at = 0; this.ensureIndex(cx); cx.notify();
+    });
     this.search.on("submit", (_e, cx) => { this.openResult(cx); cx.notify(); });
     this.refresh(cx);
     cx.timer.every(10000, cx => this.refresh(cx));
@@ -133,6 +137,17 @@ export default class Files extends View {
     if (!this.desktop || this.dirty) return;
     this.browse = this.browse === this.desktop ? null : this.desktop;
     this.refresh(cx);
+  }
+
+  // The active space changed: its own search comes back. The input is set after this render.
+  syncQuery(cx) {
+    const space = spaces().find(s => s.active)?.id ?? null;
+    if (space === this.querySpace) return;
+    const next = switchQuery(this.queries, this.querySpace, space, this.query);
+    this.querySpace = space;
+    if (next === this.query) return;
+    this.query = next; this.at = 0;
+    cx.timer.after(0, cx => { if (this.search.value() !== this.query) this.search.set_value(this.query); this.ensureIndex(cx); cx.notify(); });
   }
 
   // Builds (or rebuilds, when stale) the file list the search filters. Old results stay meanwhile.
@@ -516,6 +531,7 @@ export default class Files extends View {
 
   render(cx) {
     motionTick(this, cx);
+    this.syncQuery(cx);
     if (key(this.browse) !== this.context?.key) this.refresh(cx);
     const t = theme(), canUp = !this.file && Boolean(this.root && parent(this.root));
     const bar = () => h_flex().h(34).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border).text_size(12);
