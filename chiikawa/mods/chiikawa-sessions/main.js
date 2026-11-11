@@ -3,11 +3,14 @@
 // Sessions panel: Claude Code sessions started in the focused pane's repository (or just its folder),
 // newest first. A row reopens the session in a new tab with `claude -r <id>`. Local or remote.
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, InputState, Input } from "gpui-base";
+import { panel, header, toolbar, chip, button, iconButton, errorLine, note, confirmBox, menu, onEscape } from "./ui.js";
 import { spaces, panes, focused, exec, run, notify, theme, layout, window, shared } from "herdr";
-import { encodeProject, worktreePaths, sessionLines, toSessions, pickSessions, isUnder, sessionMeta, tabTitle, emptyText, sessionsCommand } from "./logic.js";
+import { encodeProject, worktreePaths, sessionLines, liveIds, toSessions, pickSessions, isUnder, sessionMeta, tabTitle, emptyText, sessionsCommand, renameCommand, colorCommand, deleteCommand, COLORS, actionError, deleteConfirmText } from "./logic.js";
 
 const REFRESH_MS = 30000, SHOW_LIMIT = 100;
+const HEX = { red: "#e5534b", blue: "#539bf5", green: "#57ab5a", yellow: "#c69026", purple: "#b083f0", orange: "#e0823d", pink: "#e275ad", cyan: "#39c5cf" };
+
 const PANEL = "sessions";
 // Panel motion, same in every chiikawa panel: slide in when this panel becomes the shown one,
 // slide out on chiikawa-tabs' close signal (shared "chiikawa-panel.close" = { id, t }), then hide the panel.
@@ -58,16 +61,20 @@ async function collect({ cwd, on }) {
   const root = inRepo ? top.stdout.trim() : cwd;
   const list = inRepo ? await exec("git", ["worktree", "list", "--porcelain"], { cwd, on }).catch(() => null) : null;
   const worktrees = worktreePaths(list?.code === 0 ? list.stdout : "", root);
-  const c = sessionsCommand(worktrees.map(encodeProject), await isWindows(on));
+  const windows = await isWindows(on);
+  const c = sessionsCommand(worktrees.map(encodeProject), windows);
   const r = await exec(c.command, c.args, { on });
   if (r.code !== 0) throw new Error((r.stderr || "").trim() || "세션 목록을 읽지 못했어요");
-  return { root, worktrees, sessions: toSessions(sessionLines(r.stdout)) };
+  return { root, worktrees, sessions: toSessions(sessionLines(r.stdout)), live: liveIds(r.stdout), windows };
 }
 
 export default class Sessions extends View {
   init(_props, cx) {
     this.scope = "all"; this.context = null; this.data = null; this.error = null;
-    this.loading = false; this.again = false; this.wasShown = this.visible();
+    this.loading = false; this.manual = false; this.again = false; this.wasShown = this.visible();
+    this.act = null; // the ⋯ box: { id, dir, title, step: "menu" | "rename" | "color" | "confirm" | "running" | "failed", kind, error }
+    this.nameInput = InputState.new({ placeholder: "세션 이름" });
+    this.nameInput.on("submit", (_e, cx) => { this.runAct("rename", cx); cx.notify(); });
     if (this.wasShown) this.refresh(cx);
     cx.timer.every(REFRESH_MS, cx => { if (this.visible()) this.refresh(cx); });
     motionInit(this, cx);
@@ -88,8 +95,8 @@ export default class Sessions extends View {
       const keep = Boolean(this.data && this.context && this.context.on === loc.on && loc.cwd
         && this.data.worktrees.some(w => isUnder(loc.cwd, w)));
       this.context = { key: next, cwd: loc.cwd, on: loc.on };
-      if (!keep) this.data = null;
-      this.error = null; this.loading = false; this.again = false;
+      if (!keep) { this.data = null; if (this.act?.step !== "running") this.act = null; }
+      this.error = null; this.loading = false; this.manual = false; this.again = false;
     }
     if (!this.context.cwd) return;
     if (this.loading) { this.again = true; return; }
@@ -98,12 +105,15 @@ export default class Sessions extends View {
     cx.spawn(async cx => {
       try {
         const data = await collect(context);
-        if (this.context === context) { this.data = data; this.error = null; }
+        if (this.context === context) {
+          this.data = data; this.error = null;
+          if (this.act && this.act.step !== "running" && !data.sessions.some(x => x.id === this.act.id)) this.act = null;
+        }
       } catch (e) {
         if (this.context === context) this.error = String(e?.message ?? e);
       } finally {
         if (this.context === context) {
-          this.loading = false;
+          this.loading = false; this.manual = false;
           if (this.again) { this.again = false; this.refresh(cx); }
         }
         cx.notify();
@@ -116,6 +126,112 @@ export default class Sessions extends View {
     catch (e) { notify({ title: "세션을 열지 못했어요", body: String(e), level: "error", timeout: 5000 }); }
   }
 
+  toggleMenu(s) {
+    if (this.act?.step === "running") return;
+    this.act = this.act?.id === s.id ? null : { id: s.id, dir: s.dir, title: s.title, color: s.color, step: "menu", kind: null, error: null };
+  }
+
+  startRename() {
+    const a = this.act;
+    if (!a || this.isLive(a.id)) return;
+    a.step = "rename";
+    this.nameInput.set_value(a.title === "(제목 없음)" ? "" : a.title);
+    this.nameInput.focus();
+  }
+
+  isLive(id) { return Boolean(this.data?.live.has(String(id).toLowerCase())); }
+
+  // Runs the rename, color or delete where the list was read; then reads the list again either way.
+  runAct(kind, cx, value) {
+    const a = this.act, context = this.context;
+    if (!a || !context || a.step === "running") return;
+    if (kind !== "delete" && this.isLive(a.id)) return;
+    if (kind === "rename" && (a.step !== "rename" || !this.nameInput.value().trim())) return;
+    if (kind === "color" && a.step !== "color") return;
+    const windows = Boolean(this.data?.windows), permanent = !windows;
+    let c;
+    try {
+      c = kind === "rename" ? renameCommand(a.dir, a.id, this.nameInput.value(), windows)
+        : kind === "color" ? colorCommand(a.dir, a.id, value, windows) : deleteCommand(a.dir, a.id, windows);
+    }
+    catch (e) { a.step = "failed"; a.error = String(e?.message ?? e); return; }
+    a.step = "running"; a.kind = kind;
+    cx.spawn(async cx => {
+      let r = null, failure = "명령을 실행하지 못했어요";
+      try { r = await exec(c.command, c.args, { on: context.on, timeout: 60000 }); }
+      catch (e) { if (/timed?\s?out|timeout/i.test(String(e?.message ?? e))) failure = "응답이 늦어요. 목록을 새로 읽어 확인해 주세요"; }
+      const error = !r ? failure : r.code === 0 ? null : actionError(r.code, r.stderr);
+      if (this.act === a) {
+        if (error) { a.step = "failed"; a.error = error; }
+        else {
+          this.act = null;
+          if (kind === "delete") notify({ title: permanent ? "세션을 지웠어요" : "세션을 휴지통으로 보냈어요", level: "info", timeout: 3000 });
+        }
+      } else if (error) {
+        notify({ title: kind === "rename" ? "세션 이름을 바꾸지 못했어요" : kind === "color" ? "세션 색을 바꾸지 못했어요" : "세션을 지우지 못했어요", body: error, level: "error", timeout: 5000 });
+      }
+      if (this.context === context) this.refresh(cx);
+      cx.notify();
+    });
+  }
+
+  // Under a row: the small ⋯ menu at the right, or the delete question, progress or error.
+  // Renaming happens in the row itself (see titleCell).
+  actBox(s, live, t) {
+    const a = this.act;
+    if (!a || a.id !== s.id || a.step === "rename" || (a.step === "running" && a.kind === "rename")) return [];
+    const close = () => { this.act = null; };
+    if (a.step === "menu") {
+      return [h_flex().flex_none().justify_end().px(8).mb(4)
+        .child(menu(t, `session-menu-${s.id}`, [
+          { id: "session-rename", label: "수정", enabled: !live, onClick: () => this.startRename() },
+          { id: "session-color", label: "색상", enabled: !live, onClick: () => { a.step = "color"; } },
+          { id: "session-delete", label: "삭제", enabled: !live, onClick: () => { a.step = "confirm"; } },
+        ], live ? "열려 있는 세션은 Claude에서 /rename, /color로 바꿔 주세요" : null, live ? { width: 220 } : undefined))];
+    }
+    if (a.step === "color") {
+      const current = s.color ?? "default";
+      const pick = color => { if (color === current) this.act = null; else return cx => this.runAct("color", cx, color); };
+      const ring = on => on ? t.foreground : t.border;
+      return [h_flex().flex_none().justify_end().px(8).mb(4)
+        .child(h_flex().id(`session-colors-${s.id}`).p(6).gap(6).items_center().rounded(7).border_1().border_color(t.border).bg(t.background)
+          .children(COLORS.map(color => div().id(`session-color-${color}`).w(16).h(16).flex_none().rounded(8).cursor_pointer()
+            .bg(HEX[color]).border_2().border_color(ring(color === current))
+            .on_click((_e, cx) => { const go = pick(color); if (go) go(cx); cx.notify(); })))
+          .child((() => {
+            const def = button(t, "session-color-default", "기본", cx => { const go = pick("default"); if (go) go(cx); });
+            return current === "default" ? def.border_color(t.foreground) : def;
+          })()))];
+    }
+    const id = `session-act-${s.id}`;
+    if (a.step === "confirm") return [confirmBox(t, id, deleteConfirmText(a.title, !this.data?.windows),
+      { confirm: "삭제", onConfirm: cx => this.runAct("delete", cx), onCancel: close }).mx(8).mb(4)];
+    if (a.step === "running") return [h_flex().id(id).flex_none().mx(8).mb(4).px(8).py(6).gap(6).items_center().rounded(7).bg(t.hover).text_size(12)
+      .child(div().text_color(t.dim).child(a.kind === "color" ? "색 바꾸는 중…" : "지우는 중…"))];
+    return [h_flex().id(id).flex_none().mx(8).mb(4).px(8).py(6).gap(6).items_center().flex_wrap().rounded(7).bg(t.hover).text_size(12)
+      .child(div().flex_1().min_w(0).text_color(t.ansi1).child(`⚠ ${a.error}`))
+      .child(button(t, `${id}-close`, "닫기", close))];
+  }
+
+  renaming(s) {
+    const a = this.act;
+    return a?.id === s.id && (a.step === "rename" || (a.step === "running" && a.kind === "rename"));
+  }
+
+  // The row's title, or, while renaming, the name field in its place (Enter or ✓ saves, Esc or ✕ cancels).
+  titleCell(s, t) {
+    const a = this.act;
+    if (!this.renaming(s)) return div().flex_1().min_w(0).truncate().child(s.title);
+    if (a.step === "running") return div().flex_1().min_w(0).truncate().text_color(t.dim).child(`${this.nameInput.value().trim()}…`);
+    const stop = (_e, cx) => cx.stop_propagation();
+    return h_flex().id(`session-name-${s.id}`).flex_1().min_w(0).gap(4).items_center()
+      .on_mouse_down("left", stop).on_click(stop)
+      .on_key_down(onEscape(() => { this.act = null; }))
+      .child(Input.new(this.nameInput).flex_1().min_w(0).h(24).text_size(13))
+      .child(iconButton(t, `session-name-ok-${s.id}`, "✓", cx => this.runAct("rename", cx), { stop: true }))
+      .child(iconButton(t, `session-name-cancel-${s.id}`, "✕", () => { this.act = null; }, { stop: true }));
+  }
+
   render(cx) {
     motionTick(this, cx);
     const shown = this.visible();
@@ -125,29 +241,30 @@ export default class Sessions extends View {
     const picked = d ? pickSessions(d.sessions, this.scope, { worktrees: d.worktrees, cwd: c.cwd }, SHOW_LIMIT) : { items: [], more: false };
     const name = d?.root ?? c?.cwd;
     const where = name ? (c?.on ? `${c.on}:${base(name)}` : base(name)) : "";
-    const message = !c?.cwd ? "폴더가 없어요" : !d ? (this.error || "불러오는 중…") : emptyText(this.scope);
-    const chip = (id, label, on, onClick) => h_flex().id(id).h(24).px(9).flex_none().items_center().rounded(6).cursor_pointer().text_size(12)
-      .bg(on ? t.selected : t.background).text_color(on ? t.foreground : t.muted)
-      .hover(s => s.bg(t.hover)).on_click((_e, cx) => { onClick(); cx.notify(); }).child(label);
-    return v_flex().id("sessions").size_full().min_h(0).rounded(14).overflow_hidden().bg(t.surface).border_1().border_color(t.border)
-      .text_color(t.foreground).text_size(13)
+    const message = !c?.cwd ? "폴더가 없어요" : !d ? (this.error ? null : "불러오는 중…") : emptyText(this.scope);
+    return panel(t, "sessions").rounded(14).bg(t.surface)
       .relative().left(this.enter ? 0 : 22).opacity(this.enter ? 1 : 0)
       .spring("left", { response: 320, damping: 1 }).transition("opacity", { duration: 220, easing: "ease-out" })
-      .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
-        .child(div().font_semibold().child("Sessions"))
-        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(where))
-        .child(div().id("sessions-refresh").w(20).cursor_pointer().text_color(t.muted)
-          .on_click((_e, cx) => { this.refresh(cx); cx.notify(); }).child(this.loading ? "…" : "⟳")))
-      .child(h_flex().h(38).flex_none().px(10).gap(4).items_center().border_b(1).border_color(t.border)
-        .child(chip("sessions-all", "전체", this.scope === "all", () => { this.scope = "all"; }))
-        .child(chip("sessions-here", "지금 폴더", this.scope === "here", () => { this.scope = "here"; })))
+      .child(header(t, { id: "sessions", title: "Sessions", status: where, refresh: cx => { this.manual = true; this.refresh(cx); }, loading: this.manual && this.loading }))
+      .child(toolbar(t)
+        .child(chip(t, "sessions-all", "전체", this.scope === "all", () => { this.scope = "all"; }))
+        .child(chip(t, "sessions-here", "지금 폴더", this.scope === "here", () => { this.scope = "here"; })))
+      .when(Boolean(this.error), el => el.child(errorLine(t, "sessions-error", this.error, { retry: cx => this.refresh(cx), close: d ? () => { this.error = null; } : null })))
       .child(v_flex().id("sessions-list").flex_1().min_h(0).overflow_y_scrollbar().p(6)
-        .when(Boolean(this.error && d), el => el.child(div().px(8).py(4).text_size(12).text_color(t.ansi1).child(`⚠ ${this.error}`)))
-        .children(picked.items.map(s => v_flex().id(`session-${s.id}`).flex_none().px(8).py(6).gap(3).rounded(7).cursor_pointer().hover(st => st.bg(t.hover))
-          .on_click(e => { if (e.click_count === 1) this.open(s); })
-          .child(div().min_w(0).truncate().child(s.title))
-          .child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child(sessionMeta(s, d.root, now)))))
-        .when(picked.more, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("최근 100개만 보여 줘요")))
-        .when(picked.items.length === 0, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(message))));
+        .children(picked.items.flatMap(s => {
+          const live = d.live.has(s.id.toLowerCase());
+          return [v_flex().id(`session-${s.id}`).flex_none().px(8).py(6).gap(3).rounded(7).cursor_pointer().hover(st => st.bg(t.hover)).relative()
+            .on_click(e => { if (e.click_count === 1 && !this.renaming(s)) this.open(s); })
+            .when(Boolean(s.color), el => el.child(div().absolute().left(0).top(0).bottom(0).w(3).rounded(2).bg(HEX[s.color])))
+            .child(h_flex().min_w(0).gap(6).items_center()
+              .when(live, el => el.child(div().flex_none().w(8).h(8).rounded(4).bg(t.ansi2)))
+              .child(this.titleCell(s, t))
+              // ⋯: its press and click stop here, so the row doesn't open the session.
+              .when(!this.renaming(s), el => el.child(iconButton(t, `session-more-${s.id}`, "⋯", () => this.toggleMenu(s), { stop: true }))))
+            .child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child(sessionMeta(s, d.root, now))),
+          ...this.actBox(s, live, t)];
+        }))
+        .when(picked.more, el => el.child(note(t, "최근 100개만 보여 줘요")))
+        .when(picked.items.length === 0 && Boolean(message), el => el.child(note(t, message))));
   }
 }

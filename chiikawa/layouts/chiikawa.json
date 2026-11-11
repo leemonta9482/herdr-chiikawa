@@ -100,7 +100,8 @@
                     { "id": "changes", "type": "block", "content": { "mod": "chiikawa-changes" } },
                     { "id": "github", "type": "block", "content": { "mod": "chiikawa-github" } },
                     { "id": "plugins", "type": "block", "content": { "mod": "chiikawa-plugins" } },
-                    { "id": "sessions", "type": "block", "content": { "mod": "chiikawa-sessions" } }
+                    { "id": "sessions", "type": "block", "content": { "mod": "chiikawa-sessions" } },
+                    { "id": "tasks", "type": "block", "content": { "mod": "chiikawa-tasks" } }
                   ]
                 }
               ]
@@ -108,7 +109,7 @@
           ]
         },
         { "id": "status", "type": "block", "size": { "px": 28 }, "background": "chrome",
-          "content": { "mod": "workspace-status" } }
+          "content": { "mod": "chiikawa-status" } }
       ]
     }
   ]

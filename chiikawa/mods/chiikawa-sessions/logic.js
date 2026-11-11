@@ -78,23 +78,40 @@ export function sessionLines(stdout) {
     if (f[0] !== "FILE" || f.length < 8) continue;
     const cwd = jsonToken(f[4]), mtime = Number(f[3]);
     if (!cwd || f[3].trim() === "" || !Number.isFinite(mtime)) continue;
-    rows.push({ dir: f[1], id: f[2], mtime, cwd, customTitle: jsonToken(f[5]), aiTitle: jsonToken(f[6]), branch: jsonToken(f[7]) });
+    rows.push({ dir: f[1], id: f[2], mtime, cwd, customTitle: jsonToken(f[5]), aiTitle: jsonToken(f[6]), branch: jsonToken(f[7]), agentColor: jsonToken(f[8] ?? "") });
   }
   return rows;
 }
 
+export const COLORS = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** sessionsCommand's output → the ids of sessions a running Claude Code has open. */
+export function liveIds(stdout) {
+  const ids = new Set();
+  for (const line of String(stdout ?? "").split(/\r?\n/)) {
+    const f = line.split("\t");
+    if (f[0] === "LIVE" && UUID.test(f[1] ?? "")) ids.add(f[1].toLowerCase());
+  }
+  return ids;
+}
 
 const clean = t => String(t ?? "").replace(/\s+/g, " ").trim();
 
+/** Storage folder names under ~/.claude/projects: encodeProject's output. */
+const STORE = /^[A-Za-z0-9-]+$/;
+
 /** Rows → sessions to show. The id goes into a command line, so only real UUIDs pass. */
 export function toSessions(rows) {
-  return rows.filter(r => UUID.test(r.id)).map(r => ({
+  return rows.filter(r => UUID.test(r.id) && STORE.test(r.dir ?? "")).map(r => ({
     id: r.id,
     title: clean(r.customTitle) || clean(r.aiTitle) || "(제목 없음)",
     mtime: r.mtime,
     branch: r.branch,
     folder: startFolder(r.dir, r.cwd),
+    dir: r.dir,
+    color: COLORS.includes(r.agentColor) ? r.agentColor : null,
   })).filter(s => usableFolder(s.folder));
 }
 
@@ -154,16 +171,42 @@ export function psQuote(s) {
 
 const HEAD_BYTES = 262144, TAIL_BYTES = 65536, MAX_FILES = 300;
 
+// The loop over ~/.claude/sessions/*.json that finds sessions a running Claude Code has open.
+// `found` runs for each one, with the session id in $i.Groups[1].Value. Needs $live set first.
+function psLiveLoop(found) {
+  return "if ([IO.Directory]::Exists($live)) { foreach ($f in [IO.Directory]::GetFiles($live, '*.json')) { try { " +
+    "$t = [IO.File]::ReadAllText($f); " +
+    "$p = [regex]::Match($t, '\"pid\"\\s*:\\s*(\\d+)'); $i = [regex]::Match($t, '\"sessionId\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"'); $s = [regex]::Match($t, '\"startedAt\"\\s*:\\s*(\\d+)'); " +
+    "if (-not $p.Success -or -not $i.Success) { continue }; " +
+    "$proc = Get-Process -Id ([int]$p.Groups[1].Value) -ErrorAction Stop; " +
+    "if ($s.Success -and [DateTimeOffset]::new($proc.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds() -gt [long]$s.Groups[1].Value + 5000) { continue }; " +
+    found +
+    "} catch {} } }";
+}
+
+// The same for sh; `found` runs with the id in $id.
+function shLiveLoop(found) {
+  return 'for f in "$HOME/.claude/sessions"/*.json; do [ -f "$f" ] || continue; ' +
+    `pid=$(grep -a -o -E '"pid": *[0-9]+' "$f" | head -n 1 | sed 's/.*[^0-9]//'); ` +
+    `id=$(grep -a -o -E '"sessionId": *"[0-9a-fA-F-]{36}"' "$f" | head -n 1 | sed 's/.*: *"//; s/"$//'); ` +
+    `[ -n "$pid" ] && [ -n "$id" ] && kill -0 "$pid" 2>/dev/null && ${found}; done; `;
+}
+
 /**
  * One command printing a FILE line per session under ~/.claude/projects/<prefix or prefix-*>:
  * only the first cwd, the last titles and the last branch, read from the file's two ends.
  * Files without a cwd in the first part are skipped. See sessionLines for the format.
+ * Before those, a LIVE line per running session in ~/.claude/sessions/<pid>.json: only the id
+ * leaves the command, because those files also hold tokens. See liveIds.
  */
 export function sessionsCommand(prefixes, windows) {
   if (windows) {
     const token = key => `'"${key}":("(?:[^"\\\\]|\\\\.)*")'`;
     const script = [
       "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+      "$live = Join-Path $env:USERPROFILE '.claude\\sessions'",
+      // A process that started after the session did has only inherited the pid of a dead one.
+      psLiveLoop("\"LIVE`t$($i.Groups[1].Value)\" "),
       "$base = Join-Path $env:USERPROFILE '.claude\\projects'",
       "if (-not [IO.Directory]::Exists($base)) { exit 0 }",
       `$prefixes = @(${prefixes.map(psQuote).join(", ")})`,
@@ -180,8 +223,8 @@ export function sessionsCommand(prefixes, windows) {
         "} finally { $s.Close() }; " +
         `$m = [regex]::Match($head, ${token("cwd")}); if (-not $m.Success) { continue }; ` +
         "$t = [DateTimeOffset]::new($f.LastWriteTimeUtc).ToUnixTimeSeconds(); " +
-        `$custom = Last $tail ${token("customTitle")}; $ai = Last $tail ${token("aiTitle")}; $branch = Last $tail ${token("gitBranch")}; ` +
-        "\"FILE`t$($f.Directory.Name)`t$($f.BaseName)`t$t`t$($m.Groups[1].Value)`t$custom`t$ai`t$branch\" " +
+        `$custom = Last $tail ${token("customTitle")}; $ai = Last $tail ${token("aiTitle")}; $branch = Last $tail ${token("gitBranch")}; $color = Last $tail ${token("agentColor")}; ` +
+        "\"FILE`t$($f.Directory.Name)`t$($f.BaseName)`t$t`t$($m.Groups[1].Value)`t$custom`t$ai`t$branch`t$color\" " +
         "} catch {} }",
     ].join("; ");
     return { command: "powershell", args: ["-NoProfile", "-Command", script] };
@@ -189,7 +232,9 @@ export function sessionsCommand(prefixes, windows) {
   // Single backslashes only (one inside a bracket is literal): Git's sh on Windows halves doubled backslashes in arguments.
   const grab = (key, pick) => `grep -a -o -E '"${key}":"([^"\\]|[\\].)*"' | ${pick} -n 1 | sed 's/^"[A-Za-z]*"://'`;
   const script =
-    'LC_ALL=C; export LC_ALL; base="$HOME/.claude/projects"; [ -d "$base" ] || exit 0; cd "$base" || exit 1; ' +
+    'LC_ALL=C; export LC_ALL; ' +
+    shLiveLoop('printf "LIVE\\t%s\\n" "$id"') +
+    'base="$HOME/.claude/projects"; [ -d "$base" ] || exit 0; cd "$base" || exit 1; ' +
     // "./" first: on Unix every storage name starts with "-", which head, tail and stat would read as an option.
     'for p in "$@"; do for f in "./$p"/*.jsonl "./$p"-*/*.jsonl; do [ -f "$f" ] || continue; ' +
     'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f"); printf "%s\\t%s\\n" "$m" "$f"; done; done | ' +
@@ -198,7 +243,92 @@ export function sessionsCommand(prefixes, windows) {
     `custom=$(tail -c ${TAIL_BYTES} "$f" | ${grab("customTitle", "tail")}); ` +
     `ai=$(tail -c ${TAIL_BYTES} "$f" | ${grab("aiTitle", "tail")}); ` +
     `branch=$(tail -c ${TAIL_BYTES} "$f" | ${grab("gitBranch", "tail")}); ` +
+    `color=$(tail -c ${TAIL_BYTES} "$f" | ${grab("agentColor", "tail")}); ` +
     'rest=${f#./}; dir=${rest%%/*}; id=${f##*/}; id=${id%.jsonl}; ' +
-    'printf "FILE\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$dir" "$id" "$m" "$cwd" "$custom" "$ai" "$branch"; done';
+    'printf "FILE\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$dir" "$id" "$m" "$cwd" "$custom" "$ai" "$branch" "$color"; done';
   return { command: "sh", args: ["-c", script, "sessions", ...prefixes] };
+}
+
+function checkTarget(dir, id) {
+  if (!STORE.test(String(dir ?? "")) || !UUID.test(String(id ?? ""))) throw new Error("세션을 가리키지 못했어요");
+}
+
+// Appends one JSON record line to a session file (Claude Code's own way of changing a title or color).
+// A file not ending in a newline gets one first. Exit 2: no such session file.
+function appendRecordCommand(dir, id, record, windows, verb) {
+  checkTarget(dir, id);
+  const line = JSON.stringify(record);
+  if (windows) {
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      `$f = [IO.Path]::Combine($env:USERPROFILE, '.claude', 'projects', ${psQuote(dir)}, ${psQuote(`${id}.jsonl`)})`,
+      "if (-not [IO.File]::Exists($f)) { exit 2 }",
+      "try { $nl = $true; " +
+        "$r = [IO.File]::Open($f, 'Open', 'Read', 'ReadWrite, Delete'); " +
+        "try { if ($r.Length -gt 0) { [void]$r.Seek(-1, 'End'); $nl = $r.ReadByte() -eq 10 } } finally { $r.Close() }; " +
+        `$text = $(if ($nl) { '' } else { [string][char]10 }) + ${psQuote(line)} + [char]10; ` +
+        "$b = [Text.UTF8Encoding]::new($false).GetBytes($text); " +
+        "$w = [IO.File]::Open($f, [IO.FileMode]::Append, [IO.FileAccess]::Write, 'ReadWrite, Delete'); " +
+        "try { $w.Write($b, 0, $b.Length) } finally { $w.Close() } " +
+        "} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }",
+    ].join("; ");
+    return { command: "powershell", args: ["-NoProfile", "-Command", script] };
+  }
+  const script = 'f="$HOME/.claude/projects/$1/$2.jsonl"; [ -f "$f" ] || exit 2; ' +
+    '[ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ] && printf "\\n" >> "$f"; printf "%s\\n" "$3" >> "$f"';
+  return { command: "sh", args: ["-c", script, verb, dir, id, line] };
+}
+
+/** Renames a session the way Claude Code's /rename does: one custom-title record appended to its file. */
+export function renameCommand(dir, id, title, windows) {
+  checkTarget(dir, id);
+  const name = String(title ?? "").replace(/\s+/g, " ").trim();
+  if (!name) throw new Error("이름이 비어 있어요");
+  return appendRecordCommand(dir, id, { type: "custom-title", customTitle: name, sessionId: id }, windows, "rename");
+}
+
+/** Colors a session the way Claude Code's /color does: one agent-color record. "default" clears the color. */
+export function colorCommand(dir, id, color, windows) {
+  checkTarget(dir, id);
+  if (color !== "default" && !COLORS.includes(color)) throw new Error("알 수 없는 색이에요");
+  return appendRecordCommand(dir, id, { type: "agent-color", agentColor: color, sessionId: id }, windows, "color");
+}
+
+/**
+ * Deletes a session file and its same-named folder: to the Recycle Bin on Windows, for good elsewhere.
+ * Exit 3: the session is open (nothing deleted). Exit 2: no such session file. Exit 1: the file could not be
+ * removed (the folder is left alone). Exit 4: the file is gone but its folder could not be removed.
+ */
+export function deleteCommand(dir, id, windows) {
+  checkTarget(dir, id);
+  if (windows) {
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      `$id = ${psQuote(id)}`,
+      "$live = Join-Path $env:USERPROFILE '.claude\\sessions'",
+      psLiveLoop("if ($i.Groups[1].Value -eq $id) { exit 3 } "),
+      `$d = [IO.Path]::Combine($env:USERPROFILE, '.claude', 'projects', ${psQuote(dir)})`,
+      "$file = Join-Path $d ($id + '.jsonl'); $sub = Join-Path $d $id",
+      "if (-not [IO.File]::Exists($file)) { exit 2 }",
+      "try { Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($file, 'OnlyErrorDialogs', 'SendToRecycleBin') } " +
+        "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }",
+      "if ([IO.Directory]::Exists($sub)) { try { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($sub, 'OnlyErrorDialogs', 'SendToRecycleBin') } " +
+        "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 4 } }",
+    ].join("; ");
+    return { command: "powershell", args: ["-NoProfile", "-Command", script] };
+  }
+  const script = shLiveLoop(`[ "$(printf %s "$id" | tr 'A-F' 'a-f')" = "$(printf %s "$2" | tr 'A-F' 'a-f')" ] && exit 3`) +
+    'd="$HOME/.claude/projects/$1"; [ -f "$d/$2.jsonl" ] || exit 2; rm -f "$d/$2.jsonl" || exit 1; rm -rf "$d/$2" || exit 4';
+  return { command: "sh", args: ["-c", script, "delete", dir, id] };
+}
+
+export function actionError(code, stderr) {
+  if (code === 2) return "세션 파일이 없어요";
+  if (code === 3) return "열려 있는 세션은 지울 수 없어요";
+  if (code === 4) return "세션은 지웠지만 함께 있던 폴더는 지우지 못했어요";
+  return String(stderr ?? "").split(/\r?\n/).map(l => l.trim()).find(Boolean) || "실패했어요";
+}
+
+export function deleteConfirmText(title, permanent) {
+  return permanent ? `"${title}" 세션을 완전히 지울까요? 되돌릴 수 없어요.` : `"${title}" 세션을 휴지통으로 보낼까요?`;
 }
