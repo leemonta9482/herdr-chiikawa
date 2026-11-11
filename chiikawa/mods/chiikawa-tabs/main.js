@@ -2,7 +2,8 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 // Clone of Herdr's `tabs` for the chiikawa layout. Changes: closing Files/Changes/GitHub from its button
 // asks that panel to slide out first (shared "chiikawa-panel.close" = { id, t }); the panel hides itself after.
-// GitHub, Plugin and Session buttons open the chiikawa-github / -plugins / -sessions panels (idea from ssenu/Herdr-UI's my-tabs).
+// GitHub, Plugin, Session and Task buttons open the chiikawa-github / -plugins / -sessions / -tasks panels (idea from ssenu/Herdr-UI's my-tabs).
+// The panel buttons fold behind a > / < toggle right of + (from my-tabs; here they start open).
 // Dragging a tab off the bar opens chiikawa-tab-drag, and panes moved that way stay as chips after their tab
 // (from ssenu/Herdr-UI's my-tabs, Apache-2.0, see LICENSE here; logic.js unchanged, file-viewer parts left out).
 import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, notify } from "herdr";
@@ -32,6 +33,7 @@ export default class Tabs extends View {
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
     this.busy = new Set();
+    this.panelsOpen = localStorage.getItem("chiikawa-tabs.panelsOpen") !== "0"; // open until folded once
   }
 
   // The pointer left the bar with a tab held: a full-window layer takes over the drag.
@@ -165,7 +167,7 @@ export default class Tabs extends View {
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
-    const enabled = [...new Set([...(shared("workspace.panels") ?? ["files", "changes"]), "github", "plugins", "sessions"])];
+    const enabled = [...new Set([...(shared("workspace.panels") ?? ["files", "changes"]), "github", "plugins", "sessions", "tasks"])];
     this.syncPanel(space, panel, body, enabled);
     const panelButton = (id, label, icon) => {
       const on = panel && !panel.hidden && body?.active === id;
@@ -173,7 +175,7 @@ export default class Tabs extends View {
         .text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
         .hover(s => s.bg(t.hover)).on_mouse_down("left", stop)
         .on_click(() => {
-          if (on && ["files", "changes", "github", "plugins", "sessions"].includes(id)) setShared("chiikawa-panel.close", { id, t: Date.now() }); // the panel animates, then hides
+          if (on && ["files", "changes", "github", "plugins", "sessions", "tasks"].includes(id)) setShared("chiikawa-panel.close", { id, t: Date.now() }); // the panel animates, then hides
           else if (on) run("layout.hide", { id: "panel" });
           else { run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" }); }
         }).child(svg(icon).size(14)).child(label);
@@ -186,11 +188,29 @@ export default class Tabs extends View {
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(shown.flatMap(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
-      .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
-      .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
-      .when(enabled.includes("github"), el => el.child(panelButton("github", "GitHub", "mods/chiikawa-github/github.svg")))
-      .when(enabled.includes("plugins"), el => el.child(panelButton("plugins", "Plugin", "mods/chiikawa-plugins/plugins.svg")))
-      .when(enabled.includes("sessions"), el => el.child(panelButton("sessions", "Session", "mods/chiikawa-sessions/sessions.svg")))
+      // Right of +: > folds the panel buttons away, < opens them again. Remembered.
+      .child(button("panels-toggle", svg(`mods/chiikawa-tabs/chevron-${this.panelsOpen ? "right" : "left"}.svg`).size(15), (_e, cx) => {
+        this.panelsOpen = !this.panelsOpen;
+        localStorage.setItem("chiikawa-tabs.panelsOpen", this.panelsOpen ? "1" : "0");
+        cx.notify();
+      }))
+      // The panel buttons slide open from the toggle: the clip's width and opacity follow the measured row.
+      .child(h_flex().id("panel-buttons").flex_none().h(26).items_center().overflow_hidden()
+        .w(this.panelsOpen ? this.panelsWidth ?? 0 : 0).opacity(this.panelsOpen ? 1 : 0)
+        .transition("width", { duration: 180, easing: "ease-out" }).transition("opacity", { duration: 150, easing: "ease-out" })
+        .child(h_flex().id("panel-buttons-row").flex_none().gap(3).items_center()
+          .on_size_change((size, cx) => {
+            const width = Math.ceil(size.width);
+            if (width > 0 && width !== this.panelsWidth) { this.panelsWidth = width; cx.notify(); }
+          })
+          .children([
+            enabled.includes("files") && panelButton("files", "Files", "mods/files/file.svg"),
+            enabled.includes("changes") && panelButton("changes", "Changes", "mods/changes/changes.svg"),
+            enabled.includes("github") && panelButton("github", "GitHub", "mods/chiikawa-github/github.svg"),
+            enabled.includes("plugins") && panelButton("plugins", "Plugin", "mods/chiikawa-plugins/plugins.svg"),
+            enabled.includes("sessions") && panelButton("sessions", "Session", "mods/chiikawa-sessions/sessions.svg"),
+            enabled.includes("tasks") && panelButton("tasks", "Task", "mods/chiikawa-tasks/tasks.svg"),
+          ].filter(Boolean))))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/chiikawa-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/chiikawa-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/chiikawa-tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
